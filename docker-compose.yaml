@@ -1,47 +1,19 @@
 version: '3'
 
-networks:
-  frontend:
-    driver: bridge
-
 services:
-#  app:
-#    image: mokkahei24/gds:latest
-#    build:
-#      context: ./
-#      dockerfile: Dockerfile
-#    depends_on:
-#      - redis
-#    environment:
-#      TEMPLATE_PHP_INI: development
-#      PHP_INI_MEMORY_LIMIT: 2g
-#      PHP_INI_ERROR_REPORTING: E_ALL
-#      PHP_INI_XDEBUG__REMOTE_AUTOSTART: 1
-#      PHP_INI_XDEBUG__REMOTE_PORT: "9003"
-#      PHP_INI_OPCACHE__VALIDATE_TIMESTAMPS: 1
-#    volumes:
-#      - ./:/var/www/html:cached
-#    ports:
-#      - 9000:9000
-#      - 1215:1215
-#      - 80:80
-#    networks:
-#      - frontend
 
   browserless:
     image: browserless/chrome:latest
     environment:
       HOST: 0.0.0.0
-      MAX_CONCURRENT_SESSIONS: 2
-      CONNECTION_TIMEOUT: 90000
+      MAX_CONCURRENT_SESSIONS: 4
+      CONNECTION_TIMEOUT: 900000
       MAX_QUEUE_LENGTH: 100
       KEEP_ALIVE: 'true'
-    networks:
-      - frontend
-#
-#  redis:
-#    image: redis:alpine
-#    ports:
-#      - 6379:6379
-#    networks:
-#      - frontend
+    ports:
+      - 3001:3000
+
+  redis:
+    image: redis:alpine
+    ports:
+      - 6379:6379
