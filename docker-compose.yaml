@@ -2,18 +2,19 @@ version: '3'
 
 services:
 
-  browserless:
-    image: browserless/chrome:latest
-    environment:
-      HOST: 0.0.0.0
-      MAX_CONCURRENT_SESSIONS: 4
-      CONNECTION_TIMEOUT: 900000
-      MAX_QUEUE_LENGTH: 100
-      KEEP_ALIVE: 'true'
-    ports:
-      - 3001:3000
+#  browserless:
+#    image: browserless/chrome:latest
+#    platform: linux/amd64
+#    environment:
+#      HOST: 0.0.0.0
+#      MAX_CONCURRENT_SESSIONS: 4
+#      CONNECTION_TIMEOUT: 900000
+#      MAX_QUEUE_LENGTH: 100
+#      KEEP_ALIVE: 'true'
+#    ports:
+#      - 3001:3000
 
   redis:
-    image: redis:alpine
+    image: redis:6-alpine
     ports:
       - 6379:6379

@@ -27,4 +27,10 @@ export class CronService {
     await this.scraperService.getSites();
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleFinishedScrapingCheckCron() {
+    this.logger.debug('Start scrape now check');
+    await this.scraperService.finishedScrapingCheck();
+  }
+
 }

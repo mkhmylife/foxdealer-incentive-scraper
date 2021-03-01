@@ -6,8 +6,8 @@ import { Site } from '../interfaces/Site';
 import { ScraperVinsConfig } from '../interfaces/ScraperVinsConfig';
 import { PuppeteerService } from '../puppeteer/puppeteer.service';
 import { FoxApiScraperStatus } from '../enums/FoxApiScraperStatus';
-import { Make } from '../enums/Make';
 import puppeteer from 'puppeteer-core';
+import { stat } from 'fs';
 
 @Processor('scraper')
 export class ScraperProcessor {
@@ -31,15 +31,8 @@ export class ScraperProcessor {
     return res.data.vins;
   }
 
-  private async notifyFox(site: Site, status: FoxApiScraperStatus) {
-    const res = await this.httpService.post(`${site.url}/api/cdk_scraper_update_status`, {
-      status: status
-    }).toPromise();
-    console.log(res.data);
-  }
-
   private async sendIncentiveToFox(site: Site, vinConfig: ScraperVinsConfig, incentives) {
-    await this.httpService.post(`${site.url}/api/cdk_scraper_update_incentives`, {
+    return await this.httpService.post(`${site.url}/api/cdk_scraper_update_incentives`, {
       post_id: vinConfig.post_id,
       incentives
     }).toPromise();
@@ -51,11 +44,10 @@ export class ScraperProcessor {
     try {
       await page.goto(url);
 
-      const incentiveNames = await page.$$eval('[itemprop="priceSpecification"] [itemprop="name"]', els => {
-        return els.map(el => el.innerHTML.replace(/\s+/, '').trim());
-      });
-
       try {
+        const incentiveNames = await page.$$eval('[itemprop="priceSpecification"] [itemprop="name"]', els => {
+          return els.map(el => el.innerHTML.replace(/\s+/, '').trim());
+        });
         if (incentiveNames.length === 0) {
           const href = await page.$eval('.deck section h4 a', el => el.getAttribute('href'));
           await page.goto(href);
@@ -111,37 +103,48 @@ export class ScraperProcessor {
         return incentive;
       });
 
+      const incentivesWithNegativePrice = incentives.filter(incentive => incentive.price < 0);
       const parsedIncentives = {};
-      for (const incentive of incentives) {
+      for (const incentive of incentivesWithNegativePrice) {
         if (!parsedIncentives[incentive.name]) {
           parsedIncentives[incentive.name] = incentive;
+          parsedIncentives[incentive.name].value = Math.abs(parsedIncentives[incentive.name].price);
         }
         if (parsedIncentives[incentive.name]) {
           const currentPrice = parsedIncentives[incentive.name].price;
           if (Math.abs(currentPrice) < Math.abs(incentive.price)) {
             parsedIncentives[incentive.name] = incentive;
+            parsedIncentives[incentive.name].value = Math.abs(parsedIncentives[incentive.name].price);
           }
         }
       }
       return Object.values(parsedIncentives).map(incentive => incentive);
     } catch (e) {
-      throw new Error(e);
+      console.error(e);
+      return {};
     }
   }
 
   async scrapeSiteHandler(site: Site) {
     const vinsConfig = await this.getVinsConfig(site);
+    const status = this.scraperService.getSiteStatus(site);
+    if (status.status !== 'idle') {
+      return this.logger.error(`Site is already scraping ${site.url}`);
+    }
     if (!vinsConfig || vinsConfig.length === 0) {
       return this.logger.error(`Empty vinsconfig for ${site.url}`);
     }
     this.scraperService.updateSiteStatus(site, vinsConfig.length, 'scraping');
-    await this.notifyFox(site, FoxApiScraperStatus.scraping);
+    await this.scraperService.notifyFox(site, FoxApiScraperStatus.scraping);
     for (const vinConfig of vinsConfig) {
-      await this.scraperQueue.add('scrapeVins', { site, vinConfig }, {removeOnComplete: true});
+      await this.scraperQueue.add('scrapeVin', { site, vinConfig }, {
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
     }
   }
 
-  @Process({ name: 'scrape', concurrency: 2 })
+  @Process({ name: 'scrape', concurrency: 1 })
   async scrape(job: Job) {
     const site: Site = job.data.site;
     try {
@@ -151,16 +154,25 @@ export class ScraperProcessor {
     }
   }
 
-  @Process({ name: 'scrapeVins', concurrency: 8 })
-  async scrapeVins(job: Job) {
+  @Process({ name: 'scrapeVin', concurrency: 4 })
+  async scrapeVin(job: Job) {
     const site: Site = job.data.site;
+    this.scraperService.incrementSiteProgress(site);
+
+    const status = this.scraperService.getSiteStatus(site);
+    if (status.remaining === 0) {
+      // Most likely this job is coming from the old app queue
+      return this.logger.error(`Skip scrapeVin job as it seems to be fresh start`);
+    }
+
     const vinConfig: ScraperVinsConfig = job.data.vinConfig;
+
     try {
       const page = await this.puppeteerService.getNewPage();
 
-      let siteStatus = this.scraperService.getSiteStatus(site);
+      const siteStatus = this.scraperService.getSiteStatus(site);
       if (!siteStatus) {
-        await this.notifyFox(site, FoxApiScraperStatus.idle);
+        await this.scraperService.notifyFox(site, FoxApiScraperStatus.idle);
         await page.close();
         return;
       }
@@ -168,25 +180,24 @@ export class ScraperProcessor {
       try {
         const incentives = await this.scrapeSite(site, vinConfig, page);
         await page.close();
-        siteStatus = this.scraperService.getSiteStatus(site);
 
         if (Object.values(incentives).length === 0) {
-          this.scraperService.incrementSiteProgress(site, false);
           this.logger.debug(`No incentive for ${site.url} - ${vinConfig.vin} [${siteStatus.progress}% ${siteStatus.progressCounter}/${siteStatus.remaining}]`);
           return;
         }
 
         await this.sendIncentiveToFox(site, vinConfig, incentives);
-        this.scraperService.incrementSiteProgress(site, true);
+        this.scraperService.incrementSiteIncentiveCount(site);
         this.logger.debug(`Sent incentive for ${site.url} - ${vinConfig.vin} [${siteStatus.progress}% ${siteStatus.progressCounter}/${siteStatus.remaining}]`);
       } catch (e) {
         this.logger.error(e);
       }
 
-      if (siteStatus.progress >= 98) {
-        await this.notifyFox(site, FoxApiScraperStatus.idle);
+      if (siteStatus.progress >= 80) {
+        await this.scraperService.notifyFox(site, FoxApiScraperStatus.idle);
       }
     } catch(e) {
+      console.error(e);
       this.logger.error(`Error in scrpaeVins: ${e.toString()}`);
     }
   }

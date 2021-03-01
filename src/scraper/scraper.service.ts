@@ -4,8 +4,10 @@ import { Site } from '../interfaces/Site';
 import { SiteStatus } from '../interfaces/SiteStatus';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Cron } from '@nestjs/schedule';
 import { Make } from '../enums/Make';
+import { DateTime } from 'luxon';
+import { min } from 'rxjs/operators';
+import { FoxApiScraperStatus } from '../enums/FoxApiScraperStatus';
 
 @Injectable()
 export class ScraperService {
@@ -25,7 +27,10 @@ export class ScraperService {
     this.scraperQueue.clean(0, 'failed').then(() => {}).catch(e => e);
     this.scraperQueue.clean(0, 'paused').then(() => {}).catch(e => e);
     this.scraperQueue.clean(0, 'delayed').then(() => {}).catch(e => e);
-    this.getSites().then(() => {}).catch(e => e);
+    this.getSites().then(async (sites) => {
+      // const site = sites.find(s => s.url === 'https://www.avchevy.com');
+      // await this.scraperQueue.add('scrape', { site }, {removeOnComplete: true});
+    }).catch(e => e);
   }
 
   public static getMakeRealName(make: Make): string {
@@ -47,7 +52,7 @@ export class ScraperService {
     return this.sitesStatus.find(s => s.siteUrl === site.url);
   }
 
-  updateSiteStatus(site: Site, remaining: number, status: 'idle' | 'scraping') {
+  updateSiteStatus(site: Site, remaining: number, status: 'idle' | 'scraping' | 'pending') {
     const siteStatus = this.sitesStatus.find(status => status.siteUrl === site.url);
     if (siteStatus) {
       siteStatus.progress = 0;
@@ -58,28 +63,32 @@ export class ScraperService {
     }
   }
 
-  incrementSiteProgress(site: Site, hasIncentive = true) {
+  incrementSiteProgress(site: Site) {
     const siteStatus = this.sitesStatus.find(status => status.siteUrl === site.url);
     if (siteStatus) {
       siteStatus.progressCounter = siteStatus.progressCounter + 1;
-      siteStatus.progress = Math.floor(siteStatus.progressCounter / siteStatus.remaining * 100);
-      siteStatus.lastScrappedAt = new Date().toTimeString();
+      const calculatedProgress = Math.floor(siteStatus.progressCounter / siteStatus.remaining * 100);
+      siteStatus.progress = calculatedProgress > 100 ? 100 : calculatedProgress;
+        siteStatus.lastScrappedAt = DateTime.now();
       siteStatus.status = 'scraping';
 
-      if (hasIncentive) {
-        siteStatus.hasIncentiveCount = siteStatus.hasIncentiveCount + 1;
-      }
-
-      if (siteStatus.progress >= 98) {
+      if (siteStatus.progress === 100) {
         siteStatus.status = 'idle';
       }
+    }
+  }
+
+  incrementSiteIncentiveCount(site: Site) {
+    const siteStatus = this.sitesStatus.find(status => status.siteUrl === site.url);
+    if (siteStatus) {
+      siteStatus.hasIncentiveCount = siteStatus.hasIncentiveCount + 1;
     }
   }
 
   async getSites(): Promise<Array<Site>> {
     const res = await this.httpService.get('https://foxdealersites.com/api/cdk_scraper_sites_list').toPromise();
     this.sites = res.data.sites;
-    this.sites.map(site => {
+    for (const site of this.sites) {
       const siteStatus = this.sitesStatus.find(status => status.siteUrl === site.url);
       if (!siteStatus) {
         this.sitesStatus.push({
@@ -89,10 +98,11 @@ export class ScraperService {
           progressCounter: 0,
           remaining: 0,
           hasIncentiveCount: 0,
-          lastScrappedAt: 'No record',
+          lastScrappedAt: DateTime.now(),
         });
+        await this.notifyFox(site, FoxApiScraperStatus.idle);
       }
-    });
+    }
     return this.sites;
   }
 
@@ -113,8 +123,31 @@ export class ScraperService {
       if (rescrapeNow) {
         const status = this.getSiteStatus(site);
         if (status.status === 'idle') {
+          this.updateSiteStatus(site, 0, 'pending');
           this.logger.debug(`Scrape now detected for ${site.url}`);
           await this.scraperQueue.add('scrape', { site }, { removeOnComplete: true });
+        }
+      }
+    }
+  }
+
+  async notifyFox(site: Site, status: FoxApiScraperStatus) {
+    await this.httpService.post(`${site.url}/api/cdk_scraper_update_status`, {
+      status: status
+    }).toPromise();
+    this.logger.debug(`Sending status ${status} to Fox ${site.url}`);
+  }
+
+  async finishedScrapingCheck() {
+    for (const site of this.sites) {
+      const status = this.getSiteStatus(site);
+      if (status.status === 'scraping') {
+        const diff = status.lastScrappedAt.diffNow();
+        const { minutes } = diff;
+        if (minutes >= 5) {
+          // send another idle status update in case there's error
+          await this.updateSiteStatus(site, 0, 'idle');
+          await this.notifyFox(site, FoxApiScraperStatus.idle);
         }
       }
     }
