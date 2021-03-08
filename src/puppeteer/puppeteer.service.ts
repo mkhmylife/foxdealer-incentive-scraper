@@ -15,17 +15,16 @@ export class PuppeteerService {
     return this.browser;
   }
 
-  async disconnectBrowser() {
-    await this.browser.disconnect();
+  async closeBrowser() {
+    await this.browser.close();
   }
 
   async getNewPage() {
-    try {
-      return await this.browser.newPage();
-    } catch (e) {
-      await this.getNewBrowser();
+    if (this.browser && this.browser.isConnected()) {
       return await this.browser.newPage();
     }
+    await this.getNewBrowser();
+    return await this.browser.newPage();
   }
 
 }

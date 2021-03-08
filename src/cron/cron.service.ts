@@ -29,7 +29,7 @@ export class CronService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleFinishedScrapingCheckCron() {
-    this.logger.debug('Start scrape now check');
+    this.logger.debug('Start finish scrape check');
     await this.scraperService.finishedScrapingCheck();
   }
 
