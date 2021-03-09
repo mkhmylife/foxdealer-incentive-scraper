@@ -16,7 +16,9 @@ export class PuppeteerService {
   }
 
   async disconnectBrowser() {
-    await this.browser.disconnect();
+    try {
+      await this.browser.disconnect();
+    } catch (e) {}
   }
 
   async getNewPage() {
