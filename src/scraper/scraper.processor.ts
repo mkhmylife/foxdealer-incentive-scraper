@@ -26,9 +26,6 @@ export class ScraperProcessor {
     try {
       const vinsConfig = await this.scraperService.getVinsConfig(site);
       const status = this.scraperService.getSiteStatus(site);
-      if (status.status !== 'idle') {
-        return this.logger.error(`Site is already scraping ${site.url}`);
-      }
       if (!vinsConfig || vinsConfig.length === 0) {
         return this.logger.error(`Empty vinsconfig for ${site.url}`);
       }
@@ -38,6 +35,11 @@ export class ScraperProcessor {
         await this.scraperQueue.add('scrapeVin', { site, vinConfig }, {
           removeOnComplete: true,
           removeOnFail: true,
+          attempts: 3,
+          backoff: {
+            type: 'fixed',
+            delay: 1000 * 60, // backof of 60 seconds
+          },
         });
       }
     } catch (e) {

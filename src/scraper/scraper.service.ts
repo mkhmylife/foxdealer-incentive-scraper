@@ -163,8 +163,8 @@ export class ScraperService {
       const status = this.getSiteStatus(site);
       const diff = status.lastScrappedAt.diffNow();
       const { minutes } = diff;
-      if (status.status === 'scraping' && minutes >= 10) {
-        if (minutes >= 10) {
+      if (status.status === 'scraping' && minutes >= 30) {
+        if (minutes >= 30) {
           // send another idle status update in case there's error
           await this.updateSiteStatus(site, 0, 'idle');
           await this.notifyFox(site, FoxApiScraperStatus.idle);
@@ -174,6 +174,14 @@ export class ScraperService {
         await this.updateSiteStatus(site, 0, 'idle');
         await this.notifyFox(site, FoxApiScraperStatus.idle);
       }
+    }
+
+    const sitesScraping = this.sites.filter(site => {
+      const status = this.getSiteStatus(site);
+      return status.status === 'scraping';
+    });
+    if (!sitesScraping || sitesScraping.length === 0) {
+      await this.puppeteerService.disconnectBrowser();
     }
   }
 
