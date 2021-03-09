@@ -4,7 +4,6 @@ import { Site } from '../interfaces/Site';
 import { SiteStatus } from '../interfaces/SiteStatus';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Cron } from '@nestjs/schedule';
 import { Make } from '../enums/Make';
 
 @Injectable()
@@ -25,7 +24,12 @@ export class ScraperService {
     this.scraperQueue.clean(0, 'failed').then(() => {}).catch(e => e);
     this.scraperQueue.clean(0, 'paused').then(() => {}).catch(e => e);
     this.scraperQueue.clean(0, 'delayed').then(() => {}).catch(e => e);
-    this.getSites().then(() => {}).catch(e => e);
+    this.scraperQueue.empty().then(() => {}).catch(e => e);
+
+    this.getSites().then(async (sites) => {
+      // const site = sites.find(site => site.url === 'https://www.mountainviewchevrolet.com');
+      // await this.scraperQueue.add('scrape', { site }, {removeOnComplete: true});
+    }).catch(e => e);
   }
 
   public static getMakeRealName(make: Make): string {

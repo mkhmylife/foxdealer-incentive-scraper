@@ -1,4 +1,4 @@
-import { InjectQueue, OnQueueCompleted, OnQueueProgress, Process, Processor } from '@nestjs/bull';
+import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { HttpService, Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
 import { ScraperService } from './scraper.service';
@@ -6,7 +6,6 @@ import { Site } from '../interfaces/Site';
 import { ScraperVinsConfig } from '../interfaces/ScraperVinsConfig';
 import { PuppeteerService } from '../puppeteer/puppeteer.service';
 import { FoxApiScraperStatus } from '../enums/FoxApiScraperStatus';
-import { Make } from '../enums/Make';
 import puppeteer from 'puppeteer-core';
 
 @Processor('scraper')
@@ -21,8 +20,6 @@ export class ScraperProcessor {
     @InjectQueue('scraper') private readonly scraperQueue: Queue,
   ) {}
 
-
-
   private async getVinsConfig(site: Site): Promise<Array<ScraperVinsConfig>> {
     const makeRealName = ScraperService.getMakeRealName(site.make);
     const res = await this.httpService.post(`${site.url}/api/cdk_scraper_vins`, {
@@ -32,6 +29,7 @@ export class ScraperProcessor {
   }
 
   private async notifyFox(site: Site, status: FoxApiScraperStatus) {
+    console.log(site);
     const res = await this.httpService.post(`${site.url}/api/cdk_scraper_update_status`, {
       status: status
     }).toPromise();
@@ -151,7 +149,7 @@ export class ScraperProcessor {
     }
   }
 
-  @Process({ name: 'scrapeVins', concurrency: 8 })
+  @Process({ name: 'scrapeVins', concurrency: 4 })
   async scrapeVins(job: Job) {
     const site: Site = job.data.site;
     const vinConfig: ScraperVinsConfig = job.data.vinConfig;
@@ -189,5 +187,7 @@ export class ScraperProcessor {
     } catch(e) {
       this.logger.error(`Error in scrpaeVins: ${e.toString()}`);
     }
+
+    await this.puppeteerService.disconnectBrowser();
   }
 }

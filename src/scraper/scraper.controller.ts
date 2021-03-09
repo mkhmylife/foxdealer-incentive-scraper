@@ -1,7 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
 import { ScraperService } from './scraper.service';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
 
 @Controller('scraper')
 export class ScraperController {

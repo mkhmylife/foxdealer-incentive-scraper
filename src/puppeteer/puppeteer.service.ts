@@ -20,12 +20,11 @@ export class PuppeteerService {
   }
 
   async getNewPage() {
-    try {
-      return await this.browser.newPage();
-    } catch (e) {
-      await this.getNewBrowser();
+    if (this.browser && this.browser.isConnected()) {
       return await this.browser.newPage();
     }
+    await this.getNewBrowser();
+    return await this.browser.newPage();
   }
 
 }
